@@ -20,7 +20,8 @@ pytesseract.pytesseract.tesseract_cmd = r"C:\Tesseract-OCR\tesseract.exe"
 
 # Path to your image
 #
-image_path = r"C:\Users\jakep\OneDrive\Documents\Python\Neural Networks\stop.jpg"
+base_dir = os.path.dirname(__file__) # allows for img in same dir pathway (EX: Folder/NN_Update.py, stop.jpg)
+image_path = os.path.join(base_dir, "stop.jpg")
 print("Exists:", os.path.exists(image_path))
 print("Absolute path used:", image_path) 
 
@@ -34,13 +35,16 @@ class NeuralNetwork:
 
     def extract_image(self, image_path):
         try:
-            img = cv2.imread(image_path)
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU) #Otsu's thresholding
+            img = cv2.imread(image_path) #load img into Numpy array, EX: np.array([(255,255,255), (255,255,255), (255,255,255)])
+            if img is None:
+                print("[ERROR] Failed to load image from path:", image_path)
+                return []
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) # convert to grayscale
+            _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU) #Otsu's thresholding, color 0-255, 0 is black, 255 is white, THRESH_BINARY + THRESH_OTSU is a method to make the image binary
 
             temp_file = "temp_image.png"
-            cv2.imwrite(temp_file, thresh)
-            image = Image.open(temp_file)
+            cv2.imwrite(temp_file, thresh) #save the image to a temp file
+            image = Image.open(temp_file) #open the image
             print("[OK] Image opened successfully.")
         except Exception as e:
             print("[ERROR] Failed to open image:", e)
@@ -48,7 +52,7 @@ class NeuralNetwork:
 
         # Extract text from image
         #im strusting the text but should have safe gaurds for the text
-        text = pytesseract.image_to_string(image)
+        text = pytesseract.image_to_string(image, lang='eng', config='--psm 6') #pass img, look for eng words, --psm 6 "image is a single block of text, good for signs"
         print("[INFO] Raw text extracted from image:")
         print("'" + text.strip() + "'")
         print()
