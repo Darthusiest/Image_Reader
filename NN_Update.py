@@ -1,4 +1,5 @@
 import pytesseract #pull text from a image
+import numpy as np
 from PIL import Image # image processing
 import nltk #library of english words
 import difflib
@@ -19,9 +20,8 @@ from nltk.corpus import words as nltk_words
 pytesseract.pytesseract.tesseract_cmd = r"C:\Tesseract-OCR\tesseract.exe"
 
 # Path to your image
-#
 base_dir = os.path.dirname(__file__) # allows for img in same dir pathway (EX: Folder/NN_Update.py, stop.jpg)
-image_path = os.path.join(base_dir, "stop.jpg")
+image_path = os.path.join(base_dir, "highway.jpg")
 print("Exists:", os.path.exists(image_path))
 print("Absolute path used:", image_path) 
 
@@ -39,8 +39,23 @@ class NeuralNetwork:
             if img is None:
                 print("[ERROR] Failed to load image from path:", image_path)
                 return []
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) # convert to grayscale
-            _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU) #Otsu's thresholding, color 0-255, 0 is black, 255 is white, THRESH_BINARY + THRESH_OTSU is a method to make the image binary
+        
+            #prep for east model text detection
+            orig = img.copy()
+            (H, W) = img.shape[:2] #tuple (height, width, channels) -> (height, width)
+
+            #resize image to multiple of 32 east model
+            (newW, newH) = (320, 320) #east model requires 320x320
+            rW, rH = W / float(newW), H / float(newH) #resize WxH ratio
+            img = cv2.resize(img, (newW, newH))
+            intput_image = cv2.dnn.InputFromImage(img, 1.0, (newW, newH), (123.68, 116.78, 103.94), swapRB=True, crop=False)
+
+            #load east model
+            """
+            continue from here
+            """
+
+
 
             temp_file = "temp_image.png"
             cv2.imwrite(temp_file, thresh) #save the image to a temp file
@@ -52,7 +67,7 @@ class NeuralNetwork:
 
         # Extract text from image
         #im strusting the text but should have safe gaurds for the text
-        text = pytesseract.image_to_string(image, lang='eng', config='--psm 6') #pass img, look for eng words, --psm 6 "image is a single block of text, good for signs"
+        text = pytesseract.image_to_string(image, lang='eng') #pass img, look for eng words, --psm "image is a single block of text, good for signs"
         print("[INFO] Raw text extracted from image:")
         print("'" + text.strip() + "'")
         print()
