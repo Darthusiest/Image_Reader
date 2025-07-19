@@ -280,29 +280,57 @@ class NeuralNetwork:
         Detect the language of the given text using Google Translate
         """
         try:
-            # Use Google Translator to detect language
-            translator = GoogleTranslator(source='auto', target='en')
-            translation = translator.translate(text)
-            
-            # Bias: If translation is very similar to original it's likely English
-            if text.lower().strip() == translation.lower().strip():
-                return 'en'
-            
-            
-            # This is a lightweight fallback since Google Translate doesn't directly expose language detection
+            # First, check for Spanish indicators (more reliable for Spanish text)
             spanish_indicators = ['el', 'la', 'de', 'que', 'y', 'en', 'un', 'es', 'se', 'no', 'te', 'lo', 'le', 'da', 'su', 'por', 'son', 'con', 'para', 'al', 'del', 'los', 'las', 'una', 'como', 'más', 'pero', 'sus', 'me', 'hasta', 'hay', 'donde', 'han', 'quien', 'están', 'estado', 'desde', 'todo', 'nos', 'durante', 'todos', 'uno', 'les', 'ni', 'contra', 'otros', 'ese', 'eso', 'ante', 'ellos', 'e', 'esto', 'mí', 'antes', 'algunos', 'qué', 'unos', 'yo', 'otro', 'otras', 'otra', 'él', 'tanto', 'esa', 'estos', 'mucho', 'quienes', 'nada', 'muchos', 'cual', 'poco', 'ella', 'estar', 'estas', 'algunas', 'algo', 'nosotros']
             
             text_lower = text.lower()
             spanish_count = sum(1 for word in spanish_indicators if word in text_lower)
             
-            if spanish_count > 2:
+            # If we find multiple Spanish words, it's likely Spanish
+            if spanish_count >= 2:
+                print(f"[DEBUG] Found {spanish_count} Spanish indicators, detecting as Spanish")
                 return 'es'
-            else:
-                return 'en'  # Default to English for other languages
+            
+            # Use Google Translator to detect language
+            translator = GoogleTranslator(source='auto', target='en')
+            translation = translator.translate(text)
+            
+            # If translation is very similar to original, it's likely English
+            if text.lower().strip() == translation.lower().strip():
+                print("[DEBUG] Translation matches original, detecting as English")
+                return 'en'
+            
+            # If translation is significantly different, check if it's Spanish
+            # by trying to translate back to Spanish
+            try:
+                translator_to_spanish = GoogleTranslator(source='en', target='es')
+                back_translation = translator_to_spanish.translate(translation)
+                
+                # If back translation is similar to original, it was Spanish
+                if len(text) > 10:  # Only for longer texts
+                    similarity = self.calculate_similarity(text.lower(), back_translation.lower())
+                    if similarity > 0.7:  # 70% similarity threshold
+                        print(f"[DEBUG] Back translation similarity: {similarity:.2f}, detecting as Spanish")
+                        return 'es'
+            except:
+                pass
+            
+            # Default to English for other languages
+            print("[DEBUG] Defaulting to English")
+            return 'en'
                 
         except Exception as e:
             print(f"[WARNING] Language detection failed: {e}")
             return 'en'  # Default to English
+
+    def calculate_similarity(self, text1, text2):
+        """
+        Calculate similarity between two texts using difflib
+        """
+        try:
+            return difflib.SequenceMatcher(None, text1, text2).ratio()
+        except:
+            return 0.0
 
     def correct_text_by_language(self, text):
         """
@@ -363,6 +391,16 @@ class NeuralNetwork:
 
     def translate_text(self, text, target_language='en'):
         """
+        Original Text
+        ↓
+        Split into chunks:
+        ├── Chunk 1 (1800 chars) → Translate → English chunk 1
+        ├── Chunk 2 (2100 chars) → Translate → English chunk 2
+        └── Chunk 3 (1334 chars) → Translate → English chunk 3
+        ↓
+        Combine: "English chunk 1 + English chunk 2 + English chunk 3"
+        ↓
+        Final Result: Complete English translation
         Args:
             text (str): Text to translate
             target_language (str): Target language code (e.g., 'es' for Spanish, 'auto' for auto-detection)
@@ -374,6 +412,8 @@ class NeuralNetwork:
             if not text.strip():
                 return "No text to translate"
             
+            print(f"[DEBUG] Text length: {len(text)} characters")
+            
             # Handle auto-detection
             if target_language == 'auto':
                 # For auto-detection, translate to English and let the translator handle source detection
@@ -381,17 +421,90 @@ class NeuralNetwork:
                 translation = translator.translate(text)
                 return f"Auto-translation to English: {translation}"
             
+            # Check if text is too long (Google Translate limit is 5000 characters)
+            if len(text) > 4500:  # Leave some buffer
+                print(f"[INFO] Text too long ({len(text)} chars), breaking into chunks...")
+                return self.translate_long_text(text, target_language)
+            
+            print(f"[DEBUG] Attempting to translate: '{text[:100]}...' to {target_language}")
+            
             # Create translator instance for specific target language
             # Use 'auto' as source to automatically detect the input language
             translator = GoogleTranslator(source='auto', target=target_language)
             
             # Translate the text
             translation = translator.translate(text)
+            print(f"[DEBUG] Translation successful: '{translation[:100]}...'")
             return translation
             
         except Exception as e:
-            print(f"[ERROR] Translation failed: {e}")
+            print(f"[ERROR] Translation failed with error: {str(e)}")
+            print(f"[ERROR] Error type: {type(e).__name__}")
+            import traceback
+            print(f"[ERROR] Full traceback: {traceback.format_exc()}")
             return text  # Return original text if translation fails
+
+    def translate_long_text(self, text, target_language):
+        """
+        Translate long text by breaking it into chunks
+        """
+        try:
+            # Split text into sentences or paragraphs
+            sentences = text.split('. ')
+            chunks = []
+            current_chunk = ""
+            
+            for sentence in sentences:
+                # If adding this sentence would make chunk too long, start new chunk
+                if len(current_chunk + sentence) > 4000:
+                    if current_chunk:
+                        chunks.append(current_chunk.strip())
+                        current_chunk = sentence
+                    else:
+                        # Single sentence is too long, split it
+                        words = sentence.split()
+                        current_chunk = ""
+                        for word in words:
+                            if len(current_chunk + word) > 4000:
+                                if current_chunk:
+                                    chunks.append(current_chunk.strip())
+                                    current_chunk = word
+                                else:
+                                    chunks.append(word[:4000])
+                                    current_chunk = word[4000:]
+                            else:
+                                current_chunk += " " + word if current_chunk else word
+                else:
+                    current_chunk += ". " + sentence if current_chunk else sentence
+            
+            # Add the last chunk
+            if current_chunk.strip():
+                chunks.append(current_chunk.strip())
+            
+            print(f"[INFO] Split text into {len(chunks)} chunks for translation")
+            
+            # Translate each chunk
+            translator = GoogleTranslator(source='auto', target=target_language)
+            translated_chunks = []
+            
+            for i, chunk in enumerate(chunks):
+                print(f"[INFO] Translating chunk {i+1}/{len(chunks)} ({len(chunk)} chars)...")
+                try:
+                    translation = translator.translate(chunk)
+                    translated_chunks.append(translation)
+                    time.sleep(0.5)  # Small delay between chunks
+                except Exception as e:
+                    print(f"[WARNING] Failed to translate chunk {i+1}: {e}")
+                    translated_chunks.append(chunk)  # Keep original if translation fails
+            
+            # Combine translated chunks
+            final_translation = ' '.join(translated_chunks)
+            print(f"[INFO] Successfully translated {len(chunks)} chunks")
+            return final_translation
+            
+        except Exception as e:
+            print(f"[ERROR] Long text translation failed: {e}")
+            return text
 
 # Run the OCR and print result
 nn = NeuralNetwork()
@@ -430,21 +543,32 @@ if result:
         
         # Try to translate with the provided language code
         print(f"\n[TRANSLATING] Translating to {target_language}...")
+        
+        # Add a small delay to avoid rate limiting
+        import time
+        time.sleep(1)
+        
         try:
-            # First, let's try to detect the source language
-            if target_language != 'auto':
-                # Create a temporary translator to detect language
-                temp_translator = GoogleTranslator(source='auto', target='en')
-                # We can't directly detect language with deep_translator, but we can infer from translation
-                print(f"[INFO] Attempting to translate from detected language to {target_language}...")
-            
             translated_text = nn.translate_text(result, target_language)
-            print(f"[FINAL OUTPUT] Translated text: {translated_text}")
+            if translated_text and translated_text != result:
+                print(f"[FINAL OUTPUT] Translated text: {translated_text}")
+            else:
+                print(f"[WARNING] Translation returned original text or empty result")
+                print(f"[FINAL OUTPUT] Original text: {result}")
         except Exception as e:
             print(f"[ERROR] Translation failed for language '{target_language}': {e}")
             print("Trying with default language (Spanish)...")
-            translated_text = nn.translate_text(result, 'es')
-            print(f"[FINAL OUTPUT] Translated text: {translated_text}")
+            time.sleep(1)  # Another delay before retry
+            try:
+                translated_text = nn.translate_text(result, 'es')
+                if translated_text and translated_text != result:
+                    print(f"[FINAL OUTPUT] Translated text: {translated_text}")
+                else:
+                    print(f"[WARNING] Spanish translation also returned original text")
+                    print(f"[FINAL OUTPUT] Original text: {result}")
+            except Exception as e2:
+                print(f"[ERROR] Spanish translation also failed: {e2}")
+                print(f"[FINAL OUTPUT] Original text: {result}")
     
     else:
         print("[INFO] No translation.")
