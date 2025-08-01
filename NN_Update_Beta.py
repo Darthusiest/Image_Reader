@@ -1,31 +1,22 @@
-from tkinter import Y
 import pytesseract #pull text from a image
 import numpy as np #image processing
 from PIL import Image # image processing
-import nltk #library of english words
-import difflib #compare words
 import os #file path
 import cv2 #image processing
 from deep_translator import GoogleTranslator #translate text
 import time #delay
-from spellchecker import SpellChecker #multi-language spell checker
 import pdf2image #convert PDF to images
 
 #png, jpg conversion
 #special char handling  john@something.com == john@something.com
 #context of the image (the words)
 
-
-# Download word list if not already downloaded
-nltk.download('words')
-from nltk.corpus import words as nltk_words
-
 # Set up path to Tesseract OCR executable
 pytesseract.pytesseract.tesseract_cmd = r"C:\Tesseract-OCR\tesseract.exe"
 
 # Path to your image
 base_dir = os.path.dirname(__file__) # allows for img in same dir pathway (EX: Folder/NN_Update.py, stop.jpg)
-image_path = os.path.join(base_dir, "Spanish_L.jpg")
+image_path = os.path.join(base_dir, "spanish_p.pdf")
 print("Exists:", os.path.exists(image_path))
 print("Absolute path used:", image_path) 
 
@@ -115,9 +106,11 @@ class NeuralNetwork:
                 print("[WARN] No text could be extracted from PDF.")
                 return []
             
-            # Detect language and apply spelling correction
-            corrected_text = self.correct_text_by_language(combined_text.strip())
-            return corrected_text
+            # Clean up the OCR text (remove weird characters) without breaking it
+            import re
+            # Keep letters, numbers, spaces, common punctuation, and most Unicode characters
+            cleaned_text = re.sub(r'[^\w\s,.?!¡¿\-\(\)\[\]{}"\':;]', '', combined_text)
+            return cleaned_text.strip()
             
         except Exception as e:
             print(f"[ERROR] PDF processing failed: {e}")
@@ -155,9 +148,11 @@ class NeuralNetwork:
             print("[WARN] No text could be extracted from the image.")
             return []
 
-        # Detect language and apply appropriate spelling correction
-        corrected_text = self.correct_text_by_language(text.strip())
-        return corrected_text
+        # Clean up the OCR text (remove weird characters) without breaking it
+        import re
+        # Keep letters, numbers, spaces, common punctuation, and most Unicode characters
+        cleaned_text = re.sub(r'[^\w\s,.?!¡¿\-\(\)\[\]{}"\':;]', '', text)
+        return cleaned_text.strip()
 
     def extract_text_with_improved_ocr(self, image):
         """
@@ -172,95 +167,69 @@ class NeuralNetwork:
             '--oem 1 --psm 6',  # Legacy engine with uniform block
         ]
         
-        best_text = ""
-        best_confidence = 0
-        
         for config in configs:
             try:
                 # Extract text with current configuration
                 text = pytesseract.image_to_string(image, config=config)
                 
-                # Calculate a simple confidence score based on text quality
-                confidence = self.calculate_text_confidence(text)
-                
-                print(f"[DEBUG] Config {config}: Confidence {confidence:.2f}")
-                
-                if confidence > best_confidence:
-                    best_confidence = confidence
-                    best_text = text
+                # If we get readable text, use it immediately
+                if text.strip() and len(text.strip()) > 10:
+                    print(f"[DEBUG] Using config {config}: Found readable text")
+                    return text
                     
             except Exception as e:
                 print(f"[WARNING] OCR config {config} failed: {e}")
                 continue
         
         # If no good results, fall back to default
-        if not best_text.strip():
-            print("[WARNING] All OCR configs failed, using default")
-            best_text = pytesseract.image_to_string(image)
-        
-        return best_text
-
-    def calculate_text_confidence(self, text):
-        """
-        Calculate a simple confidence score for OCR text quality
-        """
-        if not text.strip():
-            return 0
-        
-        score = 0
-        words = text.split()
-        
-        # Higher score for more words
-        score += len(words) * 0.1
-        
-        # Higher score for longer average word length (indicates real words)
-        avg_word_length = sum(len(word) for word in words) / len(words) if words else 0
-        score += avg_word_length * 0.2
-        
-        # Penalty for excessive special characters
-        special_char_ratio = sum(1 for char in text if not char.isalnum() and not char.isspace()) / len(text) if text else 0
-        score -= special_char_ratio * 10
-        
-        # some common words to fall back on
-        common_words = ['the', 'and', 'or', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'el', 'la', 'de', 'que', 'y', 'en', 'un', 'es', 'se', 'no', 'te', 'lo', 'le', 'da', 'su', 'por', 'son', 'con', 'para', 'al', 'del', 'los', 'las', 'una', 'como', 'más', 'pero', 'sus', 'me', 'hasta', 'hay', 'donde', 'han', 'quien', 'están', 'estado', 'desde', 'todo', 'nos', 'durante', 'todos', 'uno', 'les', 'ni', 'contra', 'otros', 'ese', 'eso', 'ante', 'ellos', 'e', 'esto', 'mí', 'antes', 'algunos', 'qué', 'unos', 'yo', 'otro', 'otras', 'otra', 'él', 'tanto', 'esa', 'estos', 'mucho', 'quienes', 'nada', 'muchos', 'cual', 'poco', 'ella', 'estar', 'estas', 'algunas', 'algo', 'nosotros']
-        common_word_count = sum(1 for word in words if word.lower() in common_words)
-        score += common_word_count * 0.5
-        
-        return max(0, score)
+        print("[WARNING] All OCR configs failed, using default")
+        return pytesseract.image_to_string(image)
 
     def preprocess_image_for_ocr(self, img):
         """
-        Preprocess image to improve OCR accuracy
+        Preprocess image to improve OCR accuracy with multiple strategies
         """
         try:
             # Convert to grayscale
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             
-            # Apply Gaussian blur to reduce noise on image
-            blurred = cv2.GaussianBlur(gray, (1, 1), 0)
+            # Try multiple preprocessing strategies and pick the best one
+            strategies = []
             
-            # Apply thresholding to get binary image AKA (black and white)
-            _, thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU) #OTSU is a thresholding method that automatically finds the optimal threshold value
+            # Strategy 1: Minimal preprocessing (good for clean text)
+            strategies.append(("minimal", gray))
             
-            # Apply operations to clean up the image 
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 1)) #turns into 1x1 matrix 
-
-            #Dilation - this expands white areas
-            #Erosion - this shrinks white areas
-            cleaned = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel) #connects broken char's like 'i', fills gaps in letters like 'o'
-
-            #After this closing text like H E L L O = Hello
+            # Strategy 2: Light blur + adaptive threshold
+            blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+            adaptive_thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+            strategies.append(("adaptive", adaptive_thresh))
+            
+            # Strategy 3: Otsu thresholding
+            _, otsu_thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            strategies.append(("otsu", otsu_thresh))
+            
+            # Strategy 4: Morphological operations
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+            morph_cleaned = cv2.morphologyEx(otsu_thresh, cv2.MORPH_CLOSE, kernel)
+            strategies.append(("morphological", morph_cleaned))
+            
+            # Strategy 5: Inverted image (in case text is white on dark background)
+            _, inverted = cv2.threshold(255 - gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            strategies.append(("inverted", inverted))
+            
+            # Test each strategy and pick the best one
+            best_result = self.test_ocr_strategies(strategies)
             
             # Resize image if it's too small (improves OCR accuracy)
-            height, width = cleaned.shape #tuple (height, width)
-            if width < 800: #if width is less than 800 its to small, so we should scale(enlarge) the image
-                scale_factor = 800 / width #Example img = 400px, 800/400 = 2, so we should scale the image by 2
-                new_width = int(width * scale_factor) #400 * 2 = 800
-                new_height = int(height * scale_factor) #200 * 2 = 400
-                cleaned = cv2.resize(cleaned, (new_width, new_height), interpolation=cv2.INTER_CUBIC) #cv2.INTER_CUBIC gives better quality (let the function handle that)
+            height, width = best_result.shape
+            if width < 800:
+                scale_factor = 800 / width
+                new_width = int(width * scale_factor)
+                new_height = int(height * scale_factor)
+                best_result = cv2.resize(best_result, (new_width, new_height), interpolation=cv2.INTER_CUBIC)
             
             # Convert back to BGR for consistency
-            result = cv2.cvtColor(cleaned, cv2.COLOR_GRAY2BGR) #converts to BGR (Blue, Green, Red)
+            result = cv2.cvtColor(best_result, cv2.COLOR_GRAY2BGR)
             
             return result
             
@@ -268,126 +237,42 @@ class NeuralNetwork:
             print(f"[WARNING] Image preprocessing failed: {e}")
             return img  # Return original image if preprocessing fails
 
-    def validate_word(self, word):
-        return word.lower() in nltk_words.words()
-
-    def correct_word(self, word):
-        matches = difflib.get_close_matches(word.lower(), nltk_words.words(), n=1, cutoff=0.8)
-        return matches[0] if matches else word
-
-    def detect_language(self, text):
+    def test_ocr_strategies(self, strategies):
         """
-        Detect the language of the given text using Google Translate
+        Test different preprocessing strategies and return the first good one
         """
-        try:
-            # First, check for Spanish indicators (more reliable for Spanish text)
-            spanish_indicators = ['el', 'la', 'de', 'que', 'y', 'en', 'un', 'es', 'se', 'no', 'te', 'lo', 'le', 'da', 'su', 'por', 'son', 'con', 'para', 'al', 'del', 'los', 'las', 'una', 'como', 'más', 'pero', 'sus', 'me', 'hasta', 'hay', 'donde', 'han', 'quien', 'están', 'estado', 'desde', 'todo', 'nos', 'durante', 'todos', 'uno', 'les', 'ni', 'contra', 'otros', 'ese', 'eso', 'ante', 'ellos', 'e', 'esto', 'mí', 'antes', 'algunos', 'qué', 'unos', 'yo', 'otro', 'otras', 'otra', 'él', 'tanto', 'esa', 'estos', 'mucho', 'quienes', 'nada', 'muchos', 'cual', 'poco', 'ella', 'estar', 'estas', 'algunas', 'algo', 'nosotros']
-            
-            text_lower = text.lower()
-            spanish_count = sum(1 for word in spanish_indicators if word in text_lower)
-            
-            # If we find multiple Spanish words, it's likely Spanish
-            if spanish_count >= 2:
-                print(f"[DEBUG] Found {spanish_count} Spanish indicators, detecting as Spanish")
-                return 'es'
-            
-            # Use Google Translator to detect language
-            translator = GoogleTranslator(source='auto', target='en')
-            translation = translator.translate(text)
-            
-            # If translation is very similar to original, it's likely English
-            if text.lower().strip() == translation.lower().strip():
-                print("[DEBUG] Translation matches original, detecting as English")
-                return 'en'
-            
-            # If translation is significantly different, check if it's Spanish
-            # by trying to translate back to Spanish
+        for strategy_name, processed_img in strategies:
             try:
-                translator_to_spanish = GoogleTranslator(source='en', target='es')
-                back_translation = translator_to_spanish.translate(translation)
+                # Convert to PIL image for OCR
+                pil_image = Image.fromarray(processed_img)
                 
-                # If back translation is similar to original, it was Spanish
-                if len(text) > 10:  # Only for longer texts
-                    similarity = self.calculate_similarity(text.lower(), back_translation.lower())
-                    if similarity > 0.7:  # 70% similarity threshold
-                        print(f"[DEBUG] Back translation similarity: {similarity:.2f}, detecting as Spanish")
-                        return 'es'
-            except:
-                pass
-            
-            # Default to English for other languages
-            print("[DEBUG] Defaulting to English")
-            return 'en'
+                # Test with different OCR configurations
+                configs = [
+                    '--oem 3 --psm 6',  # Default
+                    '--oem 3 --psm 8',  # Single word
+                    '--oem 3 --psm 7',  # Single text line
+                    '--oem 1 --psm 6',  # Legacy engine
+                ]
                 
-        except Exception as e:
-            print(f"[WARNING] Language detection failed: {e}")
-            return 'en'  # Default to English
-
-    def calculate_similarity(self, text1, text2):
-        """
-        Calculate similarity between two texts using difflib
-        """
-        try:
-            return difflib.SequenceMatcher(None, text1, text2).ratio()
-        except:
-            return 0.0
-
-    def correct_text_by_language(self, text):
-        """
-        Use pyspellchecker for multi-language spell checking
-        """
-        if not text.strip():
-            return text
-            
-        detected_lang = self.detect_language(text)
-        print(f"[INFO] Detected language: {detected_lang}")
+                for config in configs:
+                    try:
+                        text = pytesseract.image_to_string(pil_image, config=config)
+                        text = text.strip()
+                        
+                        if text and len(text) > 10:
+                            print(f"[DEBUG] Strategy '{strategy_name}' with config '{config}': Found readable text")
+                            return processed_img
+                                
+                    except Exception as e:
+                        print(f"[DEBUG] Config {config} failed for strategy {strategy_name}: {e}")
+                        continue
+                        
+            except Exception as e:
+                print(f"[DEBUG] Strategy {strategy_name} failed: {e}")
+                continue
         
-        return self.spell_check_text(text, detected_lang) #have a function for spell checking
-
-    def spell_check_text(self, text, language):
-        """
-        Multi-language spell checking (removed manual corrections)
-        """
-        try:
-            # Map language codes
-            lang_mapping = {'en': 'en', 'es': 'es', 'fr': 'fr', 'de': 'de', 'pt': 'pt', 'ru': 'ru'}
-            spell_lang = lang_mapping.get(language, 'en')
-            
-            # Use spell checker directly (no manual corrections first)
-            spell = SpellChecker(language=spell_lang)
-            
-            # Process words with spell checker
-            words = text.split()
-            corrected_words = []
-            
-            for word in words:
-                # Let spell checker handle everything
-                clean_word = ''.join(char for char in word if char.isalpha())
-                if not clean_word:
-                    corrected_words.append(word)
-                    continue
-                    
-                if clean_word.lower() in spell:
-                    corrected_words.append(word)  # Word is correct
-                else:
-                    correction = spell.correction(clean_word)
-                    if correction:
-                        # Apply correction with case preservation
-                        if clean_word.isupper():
-                            corrected_word = correction.upper()
-                        elif clean_word.istitle():
-                            corrected_word = correction.title()
-                        else:
-                            corrected_word = correction
-                        corrected_words.append(word.replace(clean_word, corrected_word))
-                    else:
-                        corrected_words.append(word)  # Keep original
-            
-            return ' '.join(corrected_words)
-            
-        except Exception as e:
-            print(f"[WARNING] Spell check failed: {e}")
-            return text
+        print(f"[INFO] No good OCR result found, using first strategy")
+        return strategies[0][1]  # Return first strategy as fallback
 
     def translate_text(self, text, target_language='en'):
         """
@@ -424,6 +309,9 @@ class NeuralNetwork:
             # Post-process translation to improve quality
             improved_translation = self.postprocess_translation(translation, text, target_language)
             
+            # Clean any debug messages from the final result
+            improved_translation = self.clean_debug_messages(improved_translation)
+            
             print(f"[DEBUG] Translation successful: '{improved_translation[:100]}...'")
             return improved_translation
             
@@ -433,6 +321,16 @@ class NeuralNetwork:
             import traceback
             print(f"[ERROR] Full traceback: {traceback.format_exc()}")
             return text  # Return original text if translation fails
+
+    def calculate_similarity(self, text1, text2):
+        """
+        Calculate similarity between two texts using difflib
+        """
+        try:
+            import difflib
+            return difflib.SequenceMatcher(None, text1, text2).ratio()
+        except:
+            return 0.0
 
     def preprocess_text_for_translation(self, text):
         """
@@ -521,7 +419,7 @@ class NeuralNetwork:
 
     def remove_duplicate_content(self, text):
         """
-        Remove duplicate sentences and phrases
+        Remove duplicate sentences and phrases with improved logic
         """
         import re
         
@@ -534,11 +432,36 @@ class NeuralNetwork:
         
         for sentence in sentences:
             sentence_clean = sentence.strip().lower()
-            if sentence_clean and sentence_clean not in seen:
+            # More aggressive deduplication - check for similar sentences too
+            is_duplicate = False
+            for existing in seen:
+                # Check if sentences are very similar (90% similarity)
+                if self.calculate_similarity(sentence_clean, existing) > 0.9:
+                    is_duplicate = True
+                    break
+            
+            if sentence_clean and not is_duplicate:
                 seen.add(sentence_clean)
                 unique_sentences.append(sentence.strip())
         
-        return ' '.join(unique_sentences)
+        # Also remove duplicate phrases within sentences
+        result = ' '.join(unique_sentences)
+        
+        # Remove repeated phrases like "Vocabulary (Chapter 4): Read and select..."
+        phrases_to_remove = [
+            r'Vocabulary \(Chapter \d+\): Read and select.*?\.',
+            r'Demonstrative adjectives: Read and select.*?\.',
+            r'Write the conjugation of the verb.*?\.',
+        ]
+        
+        for pattern in phrases_to_remove:
+            # Keep only the first occurrence
+            matches = re.findall(pattern, result, re.IGNORECASE)
+            if len(matches) > 1:
+                for match in matches[1:]:  # Remove all but first
+                    result = result.replace(match, '', 1)
+        
+        return result
 
     def fix_common_translation_errors(self, text, target_language):
         """
@@ -614,91 +537,21 @@ class NeuralNetwork:
         """
         Fix verb translation errors based on context
         """
-        # Common verb context patterns
-        verb_contexts = {
-            'en': {
-                # Context: "I want to..." vs "I love to..."
-                r'\bI\s+love\s+to\b': 'I want to',
-                r'\bI\s+love\s+[a-z]+\b': 'I want',
-                # Context: "to want" vs "to love" in infinitive
-                r'\bto\s+love\s+([a-z]+)\b': r'to want \1',
-                # Context: "wants" vs "loves" in third person
-                r'\b([a-z]+)\s+loves\s+([a-z]+)\b': r'\1 wants \2',
-            },
-            'es': {
-                # Similar patterns for Spanish
-                r'\bquiero\s+amar\b': 'quiero querer',
-                r'\bpara\s+amar\b': 'para querer',
-            }
-        }
-        
-        import re
-        contexts = verb_contexts.get(target_language, {})
-        
-        for pattern, replacement in contexts.items():
-            sentence = re.sub(pattern, replacement, sentence, flags=re.IGNORECASE)
-        
+        # Generic approach - let the translation system handle context
         return sentence
 
     def fix_adjective_context_errors(self, sentence, target_language):
         """
         Fix adjective translation errors based on context
         """
-        # Common adjective context patterns
-        adj_contexts = {
-            'en': {
-                # Context: "more logical" vs "more magical"
-                r'\bmore\s+magical\b': 'more logical',
-                r'\bvery\s+magical\b': 'very logical',
-                r'\bmost\s+magical\b': 'most logical',
-                # Context: "logical thinking" vs "magical thinking"
-                r'\bmagical\s+thinking\b': 'logical thinking',
-                r'\bmagical\s+reasoning\b': 'logical reasoning',
-            },
-            'es': {
-                r'\bmás\s+mágico\b': 'más lógico',
-                r'\bmuy\s+mágico\b': 'muy lógico',
-            }
-        }
-        
-        import re
-        contexts = adj_contexts.get(target_language, {})
-        
-        for pattern, replacement in contexts.items():
-            sentence = re.sub(pattern, replacement, sentence, flags=re.IGNORECASE)
-        
+        # Generic approach - let the translation system handle context
         return sentence
 
     def fix_noun_context_errors(self, sentence, target_language):
         """
         Fix noun translation errors based on context
         """
-        # Common noun context patterns
-        noun_contexts = {
-            'en': {
-                # Context: section headers and proper nouns
-                r'\bGO\b(?=\s*:)': 'IR',
-                r'\bMY\b(?=\s*:)': 'MI', 
-                r'\bVILE\b(?=\s*:)': 'VIL',
-                r'\bLIFE\b(?=\s*:)': 'VIDA',
-                # Context: common noun errors
-                r'\bgo\b(?=\s+[a-z]+)': 'ir',
-                r'\bmy\b(?=\s+[a-z]+)': 'mi',
-            },
-            'es': {
-                r'\bIR\b(?=\s*:)': 'IR',
-                r'\bMI\b(?=\s*:)': 'MI',
-                r'\bVIL\b(?=\s*:)': 'VIL', 
-                r'\bVIDA\b(?=\s*:)': 'VIDA',
-            }
-        }
-        
-        import re
-        contexts = noun_contexts.get(target_language, {})
-        
-        for pattern, replacement in contexts.items():
-            sentence = re.sub(pattern, replacement, sentence, flags=re.IGNORECASE)
-        
+        # Generic approach - let the translation system handle context
         return sentence
 
     def apply_semantic_corrections(self, text, target_language):
@@ -758,10 +611,6 @@ class NeuralNetwork:
         if self.is_educational_content(text):
             text = self.apply_educational_corrections(text, target_language)
         
-        # Technical domain corrections
-        if self.is_technical_content(text):
-            text = self.apply_technical_corrections(text, target_language)
-        
         return text
 
     def is_educational_content(self, text):
@@ -777,18 +626,9 @@ class NeuralNetwork:
         text_lower = text.lower()
         return any(indicator in text_lower for indicator in educational_indicators)
 
-    def is_technical_content(self, text):
-        """
-        Detect if text is technical content
-        """
-        technical_indicators = [
-            'function', 'method', 'class', 'object', 'variable',
-            'parameter', 'return', 'error', 'debug', 'compile',
-            'algorithm', 'data', 'structure', 'interface'
-        ]
-        
-        text_lower = text.lower()
-        return any(indicator in text_lower for indicator in technical_indicators)
+    def is_technical_content(self, text): #placeholder for now 
+        #placeholder for now 
+        return False
 
     def apply_educational_corrections(self, text, target_language):
         """
@@ -815,13 +655,6 @@ class NeuralNetwork:
         for pattern, replacement in fixes:
             text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
         
-        return text
-
-    def apply_technical_corrections(self, text, target_language):
-        """
-        Apply corrections specific to technical content
-        """
-        # Add technical corrections as needed
         return text
 
     def fix_sentence_structure(self, text):
@@ -888,7 +721,19 @@ class NeuralNetwork:
         # Pre-process sentences to identify and preserve important context
         processed_sentences = self.preprocess_sentences_for_chunking(sentences)
         
-        for i, sentence in enumerate(processed_sentences):
+        # Remove duplicate sentences before chunking
+        unique_sentences = []
+        seen_sentences = set()
+        
+        for sentence in processed_sentences:
+            sentence_clean = sentence.strip().lower()
+            if sentence_clean and sentence_clean not in seen_sentences:
+                seen_sentences.add(sentence_clean)
+                unique_sentences.append(sentence)
+        
+        print(f"[INFO] Removed {len(processed_sentences) - len(unique_sentences)} duplicate sentences before chunking")
+        
+        for i, sentence in enumerate(unique_sentences):
             # Calculate space needed for this sentence
             space_needed = len(sentence) + (1 if current_chunk else 0)  # +1 for space
             
@@ -910,7 +755,7 @@ class NeuralNetwork:
                     current_chunk = sentence
             
             # If this is the last sentence, add the final chunk
-            if i == len(processed_sentences) - 1 and current_chunk.strip():
+            if i == len(unique_sentences) - 1 and current_chunk.strip():
                 chunks.append(current_chunk.strip())
         
         # Handle edge case: if any single sentence is too long
@@ -923,7 +768,19 @@ class NeuralNetwork:
             else:
                 final_chunks.append(chunk)
         
-        return final_chunks
+        # Final deduplication of chunks
+        unique_chunks = []
+        seen_chunks = set()
+        
+        for chunk in final_chunks:
+            chunk_clean = chunk.strip().lower()
+            if chunk_clean and chunk_clean not in seen_chunks:
+                seen_chunks.add(chunk_clean)
+                unique_chunks.append(chunk)
+        
+        print(f"[INFO] Removed {len(final_chunks) - len(unique_chunks)} duplicate chunks")
+        
+        return unique_chunks
 
     def preprocess_sentences_for_chunking(self, sentences):
         """
@@ -934,18 +791,6 @@ class NeuralNetwork:
         for sentence in sentences:
             # Clean up common OCR issues that affect chunking
             cleaned = sentence.strip()
-            
-            # Fix common OCR errors that create malformed sentences
-            ocr_fixes = {
-                'thousand6n': 'thousand',
-                'thousand5n': 'thousand',
-                'thousand0n': 'thousand',
-                'prefer\'more': 'prefer more',
-                'prefer"more': 'prefer more',
-            }
-            
-            for wrong, correct in ocr_fixes.items():
-                cleaned = cleaned.replace(wrong, correct)
             
             if cleaned:
                 processed.append(cleaned)
@@ -1058,12 +903,44 @@ class NeuralNetwork:
         combined = re.sub(r'\s+', ' ', combined)  # Replace multiple spaces with single space
         combined = combined.strip()
         
+        # Remove any debug messages that might have been captured
+        combined = self.clean_debug_messages(combined)
+        
         return combined
+
+    def clean_debug_messages(self, text):
+        """
+        Remove debug messages and system output from text
+        """
+        import re
+        
+        # Remove debug patterns
+        debug_patterns = [
+            r'\[Info\].*?',
+            r'\[INFO\].*?',
+            r'\[DEBUG\].*?',
+            r'\[WARNING\].*?',
+            r'\[ERROR\].*?',
+            r'Deteg Language.*?',
+            r'using spell checker.*?',
+            r'text proceted from.*?',
+            r'\[Result\].*?',
+            r'Output Words.*?',
+        ]
+        
+        for pattern in debug_patterns:
+            text = re.sub(pattern, '', text, flags=re.IGNORECASE | re.DOTALL)
+        
+        # Clean up extra whitespace
+        text = re.sub(r'\s+', ' ', text)
+        text = text.strip()
+        
+        return text
 
 # Run the OCR and print result
 nn = NeuralNetwork()
 result = nn.extract_image(image_path)
-print("[RESULT] Final output words:", result)
+print("[RESULT] Raw OCR Text:\n" + result)
 
 # User interaction for translation
 if result:
@@ -1129,5 +1006,3 @@ if result:
         print(f"[FINAL OUTPUT] Original text: {result}")
 else:
     print("[FINAL OUTPUT] No text extracted from image.")
-
-
