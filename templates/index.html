@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OCR Translator</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f5f5f5;
+      margin: 0;
+      padding: 0;
+    }
+
+    .navbar {
+      background-color: white;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .navbar .logo {
+      font-weight: bold;
+      color: #c90000;
+    }
+
+    .container {
+      max-width: 800px;
+      margin: 50px auto;
+      padding: 40px;
+      background: white;
+      border-radius: 10px;
+      text-align: center;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+    }
+
+    .container h2 {
+      margin-bottom: 20px;
+    }
+
+    .drop-zone {
+      border: 2px dashed #ccc;
+      border-radius: 10px;
+      padding: 40px;
+      cursor: pointer;
+      margin-bottom: 20px;
+      transition: 0.2s;
+    }
+
+    .drop-zone.dragover {
+      border-color: #0066cc;
+      background: #f0f8ff;
+    }
+
+    input[type="file"] {
+      display: none;
+    }
+
+    button {
+      background: #0066cc;
+      color: white;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      margin: 10px;
+    }
+
+    button:hover {
+      background: #004c99;
+    }
+
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+
+    select {
+      padding: 8px 12px;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+      margin: 10px;
+      font-size: 14px;
+    }
+
+    .output-container {
+      margin-top: 20px;
+      text-align: left;
+    }
+
+    .output-section {
+      margin-bottom: 20px;
+    }
+
+    .output-section h3 {
+      margin-bottom: 10px;
+      color: #333;
+    }
+
+    textarea {
+      width: 100%;
+      height: 150px;
+      padding: 10px;
+      font-size: 14px;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+      resize: vertical;
+      font-family: monospace;
+    }
+
+    .loading {
+      display: none;
+      margin: 20px 0;
+    }
+
+    .loading.show {
+      display: block;
+    }
+
+    .spinner {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #0066cc;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    .error {
+      color: #d32f2f;
+      background-color: #ffebee;
+      padding: 10px;
+      border-radius: 5px;
+      margin: 10px 0;
+    }
+
+    .success {
+      color: #2e7d32;
+      background-color: #e8f5e8;
+      padding: 10px;
+      border-radius: 5px;
+      margin: 10px 0;
+    }
+
+    .file-info {
+      margin: 10px 0;
+      padding: 10px;
+      background-color: #f5f5f5;
+      border-radius: 5px;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div class="navbar">
+    <div class="logo">OCR & Translate</div>
+    <div class="menu">Convert | Translate</div>
+  </div>
+
+  <div class="container">
+    <h2>Upload a file to extract or translate text</h2>
+
+    <div class="drop-zone" id="dropZone">
+      <p>Drag & drop an image or PDF file here, or click to select</p>
+      <input type="file" id="fileInput" name="file" accept=".png,.jpg,.jpeg,.gif,.bmp,.tiff,.pdf">
+    </div>
+
+    <div id="fileInfo" class="file-info" style="display: none;"></div>
+
+    <select id="langSelect">
+      <option value="">-- No Translation --</option>
+      <option value="auto">Auto Detect</option>
+      <option value="en">English</option>
+      <option value="es">Spanish</option>
+      <option value="fr">French</option>
+      <option value="de">German</option>
+      <option value="it">Italian</option>
+      <option value="pt">Portuguese</option>
+      <option value="ru">Russian</option>
+      <option value="ja">Japanese</option>
+      <option value="ko">Korean</option>
+      <option value="zh">Chinese</option>
+      <option value="ar">Arabic</option>
+      <option value="hi">Hindi</option>
+    </select>
+
+    <button onclick="submitFile()" id="submitBtn">Submit</button>
+
+    <div class="loading" id="loading">
+      <div class="spinner"></div>
+      <p>Processing your file...</p>
+    </div>
+
+    <div id="errorMessage"></div>
+
+    <div class="output-container" id="outputContainer" style="display: none;">
+      <div class="output-section">
+        <h3>Extracted Text:</h3>
+        <textarea id="originalText" readonly placeholder="Extracted text will appear here..."></textarea>
+      </div>
+      
+      <div class="output-section" id="translationSection" style="display: none;">
+        <h3>Translated Text:</h3>
+        <textarea id="translatedText" readonly placeholder="Translated text will appear here..."></textarea>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    const fileInfo = document.getElementById('fileInfo');
+    const submitBtn = document.getElementById('submitBtn');
+    const loading = document.getElementById('loading');
+    const errorMessage = document.getElementById('errorMessage');
+    const outputContainer = document.getElementById('outputContainer');
+    const originalText = document.getElementById('originalText');
+    const translatedText = document.getElementById('translatedText');
+    const translationSection = document.getElementById('translationSection');
+
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('dragover', e => {
+      e.preventDefault();
+      dropZone.classList.add('dragover');
+    });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+      fileInput.files = e.dataTransfer.files;
+      updateFileInfo();
+    });
+
+    fileInput.addEventListener('change', updateFileInfo);
+
+    function updateFileInfo() {
+      const file = fileInput.files[0];
+      if (file) {
+        const size = (file.size / 1024 / 1024).toFixed(2);
+        fileInfo.innerHTML = `Selected: ${file.name} (${size} MB)`;
+        fileInfo.style.display = 'block';
+      } else {
+        fileInfo.style.display = 'none';
+      }
+    }
+
+    async function submitFile() {
+      const file = fileInput.files[0];
+      const lang = document.getElementById('langSelect').value;
+
+      if (!file) {
+        showError('Please select a file first.');
+        return;
+      }
+
+      // Check file size (16MB limit)
+      if (file.size > 16 * 1024 * 1024) {
+        showError('File too large. Maximum size is 16MB.');
+        return;
+      }
+
+      // Show loading and disable button
+      loading.classList.add('show');
+      submitBtn.disabled = true;
+      hideError();
+      outputContainer.style.display = 'none';
+
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('lang', lang);
+
+      try {
+        const response = await fetch('/extract', {
+          method: 'POST',
+          body: formData
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+          // Display results
+          originalText.value = data.original_text || '';
+          
+          if (data.translated_text) {
+            translatedText.value = data.translated_text;
+            translationSection.style.display = 'block';
+          } else {
+            translationSection.style.display = 'none';
+          }
+          
+          outputContainer.style.display = 'block';
+          showSuccess('File processed successfully!');
+        } else {
+          showError(data.error || 'An error occurred while processing the file.');
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        showError('Network error. Please try again.');
+      } finally {
+        // Hide loading and enable button
+        loading.classList.remove('show');
+        submitBtn.disabled = false;
+      }
+    }
+
+    function showError(message) {
+      errorMessage.innerHTML = `<div class="error">${message}</div>`;
+      errorMessage.style.display = 'block';
+    }
+
+    function showSuccess(message) {
+      errorMessage.innerHTML = `<div class="success">${message}</div>`;
+      errorMessage.style.display = 'block';
+    }
+
+    function hideError() {
+      errorMessage.style.display = 'none';
+    }
+  </script>
+</body>
+</html>
