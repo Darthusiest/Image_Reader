@@ -173,7 +173,3 @@ To modify the application:
 2. **Backend Logic**: Edit `NN_Update_Beta.py`
 3. **Web Routes**: Edit `app.py`
 4. **Dependencies**: Update `requirements.txt`
-
-## License
-
-This project is for educational purposes. Please respect the terms of service for any third-party APIs used (Google Translate, etc.). 
